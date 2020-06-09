@@ -2,6 +2,14 @@ from Kitsune import Kitsune
 import numpy as np
 import time
 
+import argparse
+
+parser = argparse.ArgumentParser(description='Run Kitsune.')
+parser.add_argument('--traffic-trace', type=str, help='pcap/tsv file to read.')
+parser.add_argument('--n-train-FM', type=int)
+parser.add_argument('--n-train-AE', type=int)
+args = parser.parse_args()
+
 ##############################################################################
 # Kitsune a lightweight online network intrusion detection system based on an ensemble of autoencoders (kitNET).
 # For more information and citation, please see our NDSS'18 paper: Kitsune: An Ensemble of Autoencoders for Online Network Intrusion Detection
@@ -13,22 +21,14 @@ import time
 #The runtimes presented in the paper, are based on the C++ implimentation (roughly 100x faster than the python implimentation)
 ###################  Last Tested with Anaconda 3.6.3   #######################
 
-# Load Mirai pcap (a recording of the Mirai botnet malware being activated)
-# The first 70,000 observations are clean...
-print("Unzipping Sample Capture...")
-import zipfile
-with zipfile.ZipFile("mirai.zip","r") as zip_ref:
-    zip_ref.extractall()
-
-
 # File location
-path = "mirai.pcap" #the pcap, pcapng, or tsv file to process.
+path = args.traffic_trace #the pcap, pcapng, or tsv file to process.
 packet_limit = np.Inf #the number of packets to process
 
 # KitNET params:
 maxAE = 10 #maximum size for any autoencoder in the ensemble layer
-FMgrace = 5000 #the number of instances taken to learn the feature mapping (the ensemble's architecture)
-ADgrace = 50000 #the number of instances used to train the anomaly detector (ensemble itself)
+FMgrace = args.n_train_FM #the number of instances taken to learn the feature mapping (the ensemble's architecture)
+ADgrace = args.n_train_AE #the number of instances used to train the anomaly detector (ensemble itself)
 
 # Build Kitsune
 K = Kitsune(path,packet_limit,maxAE,FMgrace,ADgrace)
@@ -71,4 +71,4 @@ plt.annotate('Mirai Bot Activated\nMirai scans network\nfor vulnerable devices',
 plt.annotate('Mirai Bot launches DoS attack', xy=(370000,100), xytext=(390000,1000),arrowprops=dict(facecolor='black', shrink=0.05),)
 figbar=plt.colorbar()
 figbar.ax.set_ylabel('Log Probability\n ', rotation=270)
-plt.show()
+plt.savefig('test.png')
