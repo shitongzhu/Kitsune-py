@@ -1,13 +1,15 @@
 from Kitsune import Kitsune
 import numpy as np
 import time
-
+from sklearn import metrics
 import argparse
 
 parser = argparse.ArgumentParser(description='Run Kitsune.')
 parser.add_argument('--traffic-trace', type=str, help='pcap/tsv file to read.')
 parser.add_argument('--n-train-FM', type=int)
 parser.add_argument('--n-train-AE', type=int)
+parser.add_argument('--attack-start', type=int, default=100000000)
+parser.add_argument('--cutoff', type=int, default=100000000)
 args = parser.parse_args()
 
 ##############################################################################
@@ -41,34 +43,20 @@ start = time.time()
 # In this way, each observation is discarded after performing process() method.
 while True:
     i+=1
-    if i % 1000 == 0:
+    if i % 5000 == 0:
         print(i)
     rmse = K.proc_next_packet()
-    if rmse == -1:
+    if rmse == -1 or i > args.cutoff:
         break
     RMSEs.append(rmse)
 stop = time.time()
 print("Complete. Time elapsed: "+ str(stop - start))
 
+train_cutoff = FMgrace + ADgrace + 1
+benign_rmses = RMSEs[train_cutoff:args.attack_start]
+attack_rmses = RMSEs[args.attack_start+1:]
 
-# Here we demonstrate how one can fit the RMSE scores to a log-normal distribution (useful for finding/setting a cutoff threshold \phi)
-from scipy.stats import norm
-benignSample = np.log(RMSEs[FMgrace+ADgrace+1:100000])
-logProbs = norm.logsf(np.log(RMSEs), np.mean(benignSample), np.std(benignSample))
-
-# plot the RMSE anomaly scores
-print("Plotting results")
-from matplotlib import pyplot as plt
-from matplotlib import cm
-plt.figure(figsize=(10,5))
-fig = plt.scatter(range(FMgrace+ADgrace+1,len(RMSEs)),RMSEs[FMgrace+ADgrace+1:],s=0.1,c=logProbs[FMgrace+ADgrace+1:],cmap='RdYlGn')
-plt.yscale("log")
-plt.title("Anomaly Scores from Kitsune's Execution Phase")
-plt.ylabel("RMSE (log scaled)")
-plt.xlabel("Time elapsed [min]")
-plt.annotate('Mirai C&C channel opened [Telnet]', xy=(121662,RMSEs[121662]), xytext=(151662,1),arrowprops=dict(facecolor='black', shrink=0.05),)
-plt.annotate('Mirai Bot Activated\nMirai scans network\nfor vulnerable devices', xy=(122662,10), xytext=(122662,150),arrowprops=dict(facecolor='black', shrink=0.05),)
-plt.annotate('Mirai Bot launches DoS attack', xy=(370000,100), xytext=(390000,1000),arrowprops=dict(facecolor='black', shrink=0.05),)
-figbar=plt.colorbar()
-figbar.ax.set_ylabel('Log Probability\n ', rotation=270)
-plt.savefig('test.png')
+rmses = np.array(benign_rmses + attack_rmses)
+y = np.array([0] * len(benign_rmses) + [1] * len(attack_rmses))
+score = metrics.roc_auc_score(y, rmses)
+print("AUC ROC score: %f" % score)
