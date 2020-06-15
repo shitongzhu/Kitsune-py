@@ -139,3 +139,4 @@ cython_debug/
 
 # Dataset files
 *.tsv
+*.pcap

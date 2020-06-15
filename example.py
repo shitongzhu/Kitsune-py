@@ -4,24 +4,30 @@ import time
 from sklearn import metrics
 import argparse
 
+def read_ds_info(fpath):
+    with open(fpath, 'r') as fin:
+        data = fin.readlines()
+    
+    info_dict = {}
+    for row in data:
+        row = row.strip()
+        tag, start, end = row.split(',')
+        start, end = int(start), int(end)
+        if tag == 'TRAIN_SET':
+            info_dict['TRAIN_SET'] = (start, end)
+        else:
+            tag, label = '_'.join(tag.split('_')[:-1]), tag.split('_')[-1]
+            if tag not in info_dict:
+                info_dict[tag] = {}
+            info_dict[tag][label] = (start, end)
+    return info_dict
+
 parser = argparse.ArgumentParser(description='Run Kitsune.')
 parser.add_argument('--traffic-trace', type=str, help='pcap/tsv file to read.')
 parser.add_argument('--n-train-FM', type=int)
-parser.add_argument('--n-train-AE', type=int)
-parser.add_argument('--attack-start', type=int, default=100000000)
-parser.add_argument('--cutoff', type=int, default=100000000)
 args = parser.parse_args()
 
-##############################################################################
-# Kitsune a lightweight online network intrusion detection system based on an ensemble of autoencoders (kitNET).
-# For more information and citation, please see our NDSS'18 paper: Kitsune: An Ensemble of Autoencoders for Online Network Intrusion Detection
-
-# This script demonstrates Kitsune's ability to incrementally learn, and detect anomalies in recorded a pcap of the Mirai Malware.
-# The demo involves an m-by-n dataset with n=115 dimensions (features), and m=100,000 observations.
-# Each observation is a snapshot of the network's state in terms of incremental damped statistics (see the NDSS paper for more details)
-
-#The runtimes presented in the paper, are based on the C++ implimentation (roughly 100x faster than the python implimentation)
-###################  Last Tested with Anaconda 3.6.3   #######################
+info_dict = read_ds_info(args.traffic_trace + '.info')
 
 # File location
 path = args.traffic_trace #the pcap, pcapng, or tsv file to process.
@@ -30,7 +36,8 @@ packet_limit = np.Inf #the number of packets to process
 # KitNET params:
 maxAE = 10 #maximum size for any autoencoder in the ensemble layer
 FMgrace = args.n_train_FM #the number of instances taken to learn the feature mapping (the ensemble's architecture)
-ADgrace = args.n_train_AE #the number of instances used to train the anomaly detector (ensemble itself)
+ADgrace = info_dict['TRAIN_SET'][1] - info_dict['TRAIN_SET'][0] + 1 - FMgrace #the number of instances used to train the anomaly detector (ensemble itself)
+del info_dict['TRAIN_SET']
 
 # Build Kitsune
 K = Kitsune(path,packet_limit,maxAE,FMgrace,ADgrace)
@@ -46,17 +53,21 @@ while True:
     if i % 5000 == 0:
         print(i)
     rmse = K.proc_next_packet()
-    if rmse == -1 or i > args.cutoff:
+    if rmse == -1:
         break
     RMSEs.append(rmse)
 stop = time.time()
 print("Complete. Time elapsed: "+ str(stop - start))
 
-train_cutoff = FMgrace + ADgrace + 1
-benign_rmses = RMSEs[train_cutoff:args.attack_start]
-attack_rmses = RMSEs[args.attack_start+1:]
-
-rmses = np.array(benign_rmses + attack_rmses)
-y = np.array([0] * len(benign_rmses) + [1] * len(attack_rmses))
-score = metrics.roc_auc_score(y, rmses)
-print("AUC ROC score: %f" % score)
+for tag, label in info_dict.items():
+    benign_start, benign_end = label['benign']
+    attack_start, attack_end = label['attack']
+    benign_rmses = RMSEs[benign_start:benign_end]
+    attack_rmses = RMSEs[attack_start:attack_end]
+    if len(benign_rmses) == 0 or len(attack_rmses) == 0:
+        print("AUC ROC score for [%s]: ERROR_ZERO_COUNT" % tag)
+        continue
+    rmses = np.array(benign_rmses + attack_rmses)
+    y = np.array([0] * len(benign_rmses) + [1] * len(attack_rmses))
+    score = metrics.roc_auc_score(y, rmses)
+    print("AUC ROC score for [%s]: %f" % (tag, score))
